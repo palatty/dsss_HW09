@@ -1,56 +1,66 @@
-
-
-
 from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, CallbackContext
-from telegram.ext.filters import TEXT
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
 
-# Initialize the LLM (replace "gpt2" with your chosen model)
-MODEL_NAME = "gpt2"  # Use "tiny-llama" if applicable
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+# Replace 'YOUR_API_TOKEN' with your bot's API token
+API_TOKEN = '7939705782:AAGGTz7_QPn1fp2-okphgvP5SCi5swXo97o'
 
-# Telegram Bot Token (from BotFather)
-TELEGRAM_TOKEN = "7939705782:AAGGTz7_QPn1fp2-okphgvP5SCi5swXo97o"
+# Load TinyLlama model and tokenizer
+print("Loading TinyLlama model...")
+tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+model = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 
-# Async start command
-async def start(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text("Hello! I am your AI Assistant. How can I help you?")
+# Move model to GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+print(f"Model loaded on {device}")
 
-# Async message handler
-async def handle_message(update: Update, context: CallbackContext) -> None:
-    user_input = update.message.text
-
-    # Prepare input for the LLM
-    inputs = tokenizer.encode(user_input, return_tensors="pt")
-
-    # Generate response from the LLM
+# Define a function to generate a response using the LLM
+def generate_response(prompt):
+    # Add a system prompt to guide the model
+    system_prompt = "You are a helpful AI assistant. Provide detailed and informative responses to user queries."
+    full_prompt = f"{system_prompt}\nUser: {prompt}\nAI:"
+    
+    # Tokenize the input and generate a response
+    inputs = tokenizer(full_prompt, return_tensors="pt").to(device)
+    # Generate response with parameters optimized for longer outputs
     outputs = model.generate(
-        inputs,
-        max_length=100,
-        temperature=0.7,
-        top_p=0.9,
-        repetition_penalty=1.2,
-        num_return_sequences=1,
-        pad_token_id=tokenizer.eos_token_id
+        **inputs,
+        max_length=300,          # Increase max_length for longer replies
+        pad_token_id=tokenizer.pad_token_id
     )
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    
+    # Extract only the AI's response (remove the system prompt and user input)
+    response = response.split("AI:")[-1].strip()
+    return response
+
+# Define a function to handle the /start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text('Hello! I am your AI assistant. Send me a message!')
+
+# Define a function to handle incoming messages
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    print(f"Received message: {user_message}")  # Log the received message
+
+    # Generate a response using the LLM
+    response = generate_response(user_message)
+    print(f"Generated response: {response}")  # Log the generated response
 
     # Send the response back to the user
     await update.message.reply_text(response)
 
-# Main function to run the bot
-def main():
-    # Create the Telegram bot application
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+# Set up the bot
+if __name__ == '__main__':
+    print("Starting bot...")
+    application = ApplicationBuilder().token(API_TOKEN).build()
 
-    # Add handlers for start and messages
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(TEXT, handle_message))
+    # Add handlers for commands and messages
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Run the bot
+    # Start the bot
+    print("Bot is running...")
     application.run_polling()
-
-if __name__ == "__main__":
-    main()
